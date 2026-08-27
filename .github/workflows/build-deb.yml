@@ -1,0 +1,136 @@
+name: Debian package
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the .deb (defaults to the tag, else 0.0.0+<sha>)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build .deb on Debian 13
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:13
+    permissions:
+      contents: read
+    steps:
+      # git must exist before actions/checkout, or it falls back to a REST
+      # tarball and the describe-based version below has no repository to read.
+      - name: Install build prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            cmake \
+            curl \
+            file \
+            git \
+            libboost-all-dev \
+            libbrotli-dev \
+            libcurl4-openssl-dev \
+            libgmock-dev \
+            libgtest-dev \
+            libhiredis-dev \
+            libmaxminddb-dev \
+            libpcre2-dev \
+            libssl-dev \
+            libxml2-dev \
+            pkg-config \
+            python3 \
+            zlib1g-dev
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Mark the workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # Upstream hardcodes the agent version to "private"
+      # (core/version/build_version_vars_h.py), so the package version comes
+      # from the tag instead of from the build.
+      - name: Determine package version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            v="${{ inputs.version }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            v="${GITHUB_REF_NAME}"
+          else
+            v="0.0.0+$(git rev-parse --short HEAD)"
+          fi
+          v="${v#v}"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "building version $v"
+
+      - name: Configure
+        run: cmake -DCMAKE_INSTALL_PREFIX=build_out .
+
+      - name: Build and install
+        run: make -j"$(nproc)" install
+
+      - name: Package (makeself self-extractors)
+        run: make package
+
+      - name: Show what was produced
+        run: |
+          ls -la build_out/*.sh || true
+          echo "--- runtime libraries the agent links against ---"
+          find build_out -type f -name "cp-nano-*" -perm -u+x -print0 2>/dev/null \
+            | xargs -0 -r -n1 ldd 2>/dev/null | awk '{print $1}' | sort -u | head -40
+
+      - name: Build the .deb
+        run: ./packaging/deb/build-deb.sh "${{ steps.ver.outputs.version }}" build_out dist
+
+      - name: Install it, and prove the agent runs
+        run: |
+          apt-get install -y --no-install-recommends ./dist/*.deb
+          open-appsec-ctl -s || true
+          test -d /etc/cp
+          echo "--- removal ---"
+          apt-get remove -y openappsec
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openappsec-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: openappsec-deb
+          path: dist
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" dist/*.deb --clobber
+          else
+            gh release create "${RELEASE_TAG}" dist/*.deb \
+              --title "${RELEASE_TAG}" \
+              --generate-notes
+          fi

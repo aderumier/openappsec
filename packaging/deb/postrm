@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        rm -rf /var/lib/openappsec /usr/share/openappsec
+        echo "openappsec: /etc/cp left in place; remove it by hand if you are sure."
+        ;;
+esac
+
+exit 0

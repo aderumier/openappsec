@@ -1,0 +1,24 @@
+Package: openappsec
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: aderumier <aderumier@users.noreply.github.com>
+Section: net
+Priority: optional
+Installed-Size: @INSTALLED_SIZE@
+Depends: libc6, libstdc++6, python3, curl, ca-certificates
+Recommends: nginx
+Homepage: https://openappsec.io
+Description: open-appsec WAF nano agent
+ open-appsec is a machine-learning web application firewall that attaches to a
+ supported reverse proxy (NGINX, Kong, APISIX) and inspects HTTP transactions
+ out of process.
+ .
+ Upstream distributes the agent as self-extracting shell installers rather than
+ distribution packages. This package carries those installers and drives them
+ from its maintainer scripts, so the agent can be installed, upgraded and
+ removed with apt like anything else on the host.
+ .
+ The NGINX attachment itself is NOT included: it is compiled against one exact
+ NGINX build and must match the nginx package installed on the host. Install it
+ with the upstream open-appsec-install script, and pin your nginx package so an
+ upgrade cannot silently break the module.

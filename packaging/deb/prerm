@@ -1,0 +1,21 @@
+#!/bin/sh
+# Hand removal back to the upstream uninstaller, which owns /etc/cp and the
+# nano_agent service it created.
+set -e
+
+SHARE=/usr/share/openappsec
+
+case "$1" in
+    remove|deconfigure)
+        if [ -x "$SHARE/install-cp-nano-agent.sh" ]; then
+            # Best effort: a failed uninstall must not wedge dpkg.
+            "$SHARE/install-cp-nano-agent.sh" --uninstall || \
+                echo "openappsec: uninstaller reported an error; check /etc/cp by hand" >&2
+        fi
+        ;;
+    upgrade|failed-upgrade)
+        # Leave the running agent alone; postinst reinstalls over it.
+        ;;
+esac
+
+exit 0
