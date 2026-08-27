@@ -1,52 +1,22 @@
 #!/bin/sh
-# Drive the upstream self-extracting installers.
+# Run each pre-extracted payload's own installer. The payloads were unpacked at
+# build time, so nothing self-extracts here and /tmp being noexec is irrelevant.
 set -e
 
 SHARE=/usr/share/openappsec
-STATE=/var/lib/openappsec
-
-# makeself archives extract to $TMPDIR and execute from there. On hosts that
-# mount /tmp noexec - a common hardening choice - that fails with a bare
-# "Permission denied" from inside the archive, and upstream's own wrapper hides
-# it. Use a directory we control, and prove it allows exec before relying on it.
-pick_tmpdir() {
-    for d in "$STATE/tmp" "$SHARE/tmp"; do
-        mkdir -p "$d" 2>/dev/null || continue
-        probe="$d/.exec-probe.$$"
-        printf '#!/bin/sh\nexit 0\n' > "$probe" 2>/dev/null || continue
-        chmod 0755 "$probe" 2>/dev/null || { rm -f "$probe"; continue; }
-        if "$probe" 2>/dev/null; then
-            rm -f "$probe"
-            echo "$d"
-            return 0
-        fi
-        rm -f "$probe"
-    done
-    return 1
-}
 
 case "$1" in
     configure)
-        if ! TMPDIR="$(pick_tmpdir)"; then
-            echo "openappsec: no writable+executable directory available for the" >&2
-            echo "  installers (tried $STATE/tmp and $SHARE/tmp). If those are on a" >&2
-            echo "  noexec mount, remount one of them exec and run:" >&2
-            echo "    dpkg-reconfigure openappsec" >&2
-            exit 1
-        fi
-        export TMPDIR
-
         # --hybrid_mode keeps policy local: no management portal token, and no
         # dependency on the Check Point cloud for day-to-day operation.
-        "$SHARE/install-cp-nano-agent.sh" --install --hybrid_mode --server "NGINX Server"
-        "$SHARE/install-cp-nano-service-http-transaction-handler.sh" --install
-        "$SHARE/install-cp-nano-attachment-registration-manager.sh" --install
-
-        rm -rf "$TMPDIR"/selfgz* 2>/dev/null || true
+        ( cd "$SHARE/agent" && ./orchestration_package.sh --install --hybrid_mode )
+        ( cd "$SHARE/http-transaction-handler" && ./install-http-transaction-handler.sh --install )
+        ( cd "$SHARE/attachment-registration-manager" && ./install-attachment-registration-manager.sh --install )
 
         echo "openappsec: installed. Check with: open-appsec-ctl -s"
-        echo "openappsec: the NGINX attachment is not part of this package; see"
-        echo "  /usr/share/doc/openappsec or the package description."
+        echo "openappsec: the NGINX attachment is NOT part of this package - it is"
+        echo "  compiled against one exact nginx build. Install it separately and"
+        echo "  pin your nginx package so an upgrade cannot break the module."
         ;;
     abort-upgrade|abort-remove|abort-deconfigure)
         ;;

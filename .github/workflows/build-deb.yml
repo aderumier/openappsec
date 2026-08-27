@@ -94,13 +94,29 @@ jobs:
       - name: Build the .deb
         run: ./packaging/deb/build-deb.sh "${{ steps.ver.outputs.version }}" build_out dist
 
-      - name: Install it, and prove the agent runs
+      # A plain container has no systemd, so nano_agent cannot start and
+      # orchestration never writes its status files. Assert only what install
+      # actually proves here; whether the agent inspects traffic has to be
+      # tested on a real host (see packaging/deb/README.md).
+      - name: Install the .deb and verify the payload layout
         run: |
           apt-get install -y --no-install-recommends ./dist/*.deb
-          open-appsec-ctl -s || true
           test -d /etc/cp
-          echo "--- removal ---"
+          test -L /usr/sbin/open-appsec-ctl
+          for d in agent http-transaction-handler attachment-registration-manager; do
+            test -d "/usr/share/openappsec/$d" || { echo "missing payload: $d" >&2; exit 1; }
+          done
+          echo "files owned by the package: $(dpkg -L openappsec | wc -l)"
+          echo "--- agent status (informational only: no systemd in a container) ---"
+          open-appsec-ctl -s 2>&1 | head -20 || true
+
+      - name: Removal must be clean
+        run: |
           apt-get remove -y openappsec
+          if [ -d /etc/cp ]; then
+            echo "::warning::removal left /etc/cp behind"; ls -la /etc/cp | head
+          fi
+          test ! -d /usr/share/openappsec/agent
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
