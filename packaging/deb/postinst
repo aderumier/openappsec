@@ -7,22 +7,35 @@
 #
 #   orchestration_package.sh              parses args directly and ignores its
 #                                         own name, so pass flags as-is
-#   install-http-transaction-handler.sh   ends with `shift; run "$@"`, so the
+#   install-http-transaction-handler.sh   end with `shift; run "$@"`, so the
 #   install-attachment-registration-...   first argument is discarded and a
 #                                         placeholder has to precede the flags
 #
-# Getting this wrong is silent-ish: the shifting scripts just print their usage
-# and exit 255.
+# Getting this wrong is silent-ish: the shifting scripts print usage, exit 255.
 set -e
 
 SHARE=/usr/share/openappsec
+DEFAULTS=/etc/default/openappsec
+
+OPENAPPSEC_TOKEN=""
+OPENAPPSEC_FOG=""
+OPENAPPSEC_RESTART_NGINX=yes
+[ -r "$DEFAULTS" ] && . "$DEFAULTS"
 
 case "$1" in
     configure)
-        # --hybrid_mode keeps policy local: no management portal token, and no
-        # dependency on the Check Point cloud for day-to-day operation.
-        ( cd "$SHARE/agent" \
-          && ./orchestration_package.sh --install --hybrid_mode )
+        # --token registers against the management portal; --hybrid_mode keeps
+        # policy local. They are mutually exclusive.
+        if [ -n "$OPENAPPSEC_TOKEN" ]; then
+            set -- --install --token "$OPENAPPSEC_TOKEN"
+            [ -n "$OPENAPPSEC_FOG" ] && set -- "$@" --fog "$OPENAPPSEC_FOG"
+            echo "openappsec: registering with the management portal"
+        else
+            set -- --install --hybrid_mode
+            echo "openappsec: local management (no token in $DEFAULTS)"
+        fi
+
+        ( cd "$SHARE/agent" && ./orchestration_package.sh "$@" )
 
         ( cd "$SHARE/http-transaction-handler" \
           && ./install-http-transaction-handler.sh \
@@ -31,6 +44,15 @@ case "$1" in
         ( cd "$SHARE/attachment-registration-manager" \
           && ./install-attachment-registration-manager.sh \
                  ./install-attachment-registration-manager.sh --install )
+
+        # See OPENAPPSEC_RESTART_NGINX in /etc/default/openappsec for why.
+        if [ "$OPENAPPSEC_RESTART_NGINX" = "yes" ] \
+           && command -v systemctl >/dev/null 2>&1 \
+           && systemctl is-active --quiet nginx 2>/dev/null; then
+            echo "openappsec: restarting nginx so the attachment re-registers"
+            systemctl restart nginx || \
+                echo "openappsec: nginx restart failed - restart it by hand, or the WAF will fail open" >&2
+        fi
 
         echo "openappsec: installed. Check with: open-appsec-ctl -s"
         echo "openappsec: the NGINX attachment is NOT part of this package - it is"

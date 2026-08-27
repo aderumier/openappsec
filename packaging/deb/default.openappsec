@@ -1,0 +1,30 @@
+# Configuration for the open-appsec agent package.
+# Read by the package's postinst when (re)configuring the agent.
+
+# Management mode.
+#
+# Leave OPENAPPSEC_TOKEN empty for local management ("hybrid mode"): policy is
+# read from /etc/cp/conf/local_policy.yaml on this host and no management
+# portal is involved.
+#
+# To manage this agent from the open-appsec cloud portal instead, create a
+# profile at https://my.openappsec.io, copy its registration token here, and
+# run:  dpkg-reconfigure openappsec  (or reinstall the package).
+#
+# The two are mutually exclusive: a token switches the agent to portal
+# management and local_policy.yaml is no longer authoritative.
+OPENAPPSEC_TOKEN=""
+
+# Alternative Fog/management endpoint. Leave empty for the default
+# (https://inext-agents.cloud.ngen.checkpoint.com).
+OPENAPPSEC_FOG=""
+
+# Restart nginx after (re)configuring the agent.
+#
+# The attachment talks to the agent over shared memory. If nginx is already
+# running when the agent is replaced, its workers keep stale channels and the
+# connection latches into "suspended due to consecutive message sending
+# errors" - the attachment then fails OPEN and inspects nothing, while every
+# status command still reports healthy. Restarting nginx re-registers the
+# workers. Set to no only if you restart nginx yourself.
+OPENAPPSEC_RESTART_NGINX=yes

@@ -74,6 +74,39 @@ curl -s -o /dev/null -w '%{http_code}\n' 'http://host/?f=../../../../etc/passwd'
 Extracting the payloads requires root (the archives refuse otherwise), which
 is why `build-deb.sh` is run as root in CI and needs `sudo` locally.
 
+## Cloud portal vs local management
+
+By default the agent runs in **local management** ("hybrid mode"): policy comes
+from `/etc/cp/conf/local_policy.yaml` on the host and no portal is involved.
+
+To manage it from the open-appsec cloud portal instead, create a profile at
+<https://my.openappsec.io>, copy its registration token into
+`/etc/default/openappsec`, and reconfigure:
+
+```sh
+OPENAPPSEC_TOKEN="cp-xxxxxxxx-..."     # in /etc/default/openappsec
+dpkg-reconfigure openappsec
+```
+
+The two are **mutually exclusive**. With a token the agent registers against
+the Fog and pulls policy from the portal, and `local_policy.yaml` stops being
+authoritative — so a locally tuned practice, log trigger or syslog destination
+has to be recreated in the portal. `OPENAPPSEC_FOG` overrides the endpoint for
+a self-hosted management server.
+
+`/etc/default/openappsec` is a dpkg conffile, so the token survives upgrades.
+
+## Restarting nginx
+
+`postinst` restarts nginx after configuring the agent, controlled by
+`OPENAPPSEC_RESTART_NGINX`. This is not cosmetic: the attachment talks to the
+agent over shared memory, and if nginx is already running when the agent is
+replaced, its workers hold stale channels. The connection then latches into
+`The connection is suspended due to consecutive message sending errors`, the
+attachment **fails open**, and nothing is inspected — while
+`open-appsec-ctl -s` still reports every component `Running` with registered
+instances. Exactly the failure mode that makes a healthy status untrustworthy.
+
 ## Version
 
 The upstream agent version is stated only in the makeself label, so the

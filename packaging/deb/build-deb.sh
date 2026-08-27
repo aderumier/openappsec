@@ -71,6 +71,12 @@ done
 
 echo "$VERSION" > "$root/usr/share/openappsec/VERSION"
 
+# Ship the admin-editable defaults as a real conffile so dpkg preserves local
+# edits (the portal token lives here) across upgrades.
+install -d "$root/etc/default"
+install -m 0644 "$here/default.openappsec" "$root/etc/default/openappsec"
+printf '/etc/default/openappsec\n' > "$root/DEBIAN/conffiles"
+
 installed_kb="$(du -sk "$root" | cut -f1)"
 
 sed -e "s|@VERSION@|$VERSION|g" \
