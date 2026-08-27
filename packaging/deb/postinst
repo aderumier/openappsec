@@ -1,6 +1,18 @@
 #!/bin/sh
 # Run each pre-extracted payload's own installer. The payloads were unpacked at
 # build time, so nothing self-extracts here and /tmp being noexec is irrelevant.
+#
+# The three inner scripts do NOT agree on argument handling, because makeself
+# invokes them with the script's own name as $1:
+#
+#   orchestration_package.sh              parses args directly and ignores its
+#                                         own name, so pass flags as-is
+#   install-http-transaction-handler.sh   ends with `shift; run "$@"`, so the
+#   install-attachment-registration-...   first argument is discarded and a
+#                                         placeholder has to precede the flags
+#
+# Getting this wrong is silent-ish: the shifting scripts just print their usage
+# and exit 255.
 set -e
 
 SHARE=/usr/share/openappsec
@@ -9,9 +21,16 @@ case "$1" in
     configure)
         # --hybrid_mode keeps policy local: no management portal token, and no
         # dependency on the Check Point cloud for day-to-day operation.
-        ( cd "$SHARE/agent" && ./orchestration_package.sh --install --hybrid_mode )
-        ( cd "$SHARE/http-transaction-handler" && ./install-http-transaction-handler.sh --install )
-        ( cd "$SHARE/attachment-registration-manager" && ./install-attachment-registration-manager.sh --install )
+        ( cd "$SHARE/agent" \
+          && ./orchestration_package.sh --install --hybrid_mode )
+
+        ( cd "$SHARE/http-transaction-handler" \
+          && ./install-http-transaction-handler.sh \
+                 ./install-http-transaction-handler.sh --install )
+
+        ( cd "$SHARE/attachment-registration-manager" \
+          && ./install-attachment-registration-manager.sh \
+                 ./install-attachment-registration-manager.sh --install )
 
         echo "openappsec: installed. Check with: open-appsec-ctl -s"
         echo "openappsec: the NGINX attachment is NOT part of this package - it is"
