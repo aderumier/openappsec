@@ -14,9 +14,12 @@ Description: open-appsec WAF nano agent
  out of process.
  .
  Upstream distributes the agent as self-extracting shell installers rather than
- distribution packages. This package carries those installers and drives them
- from its maintainer scripts, so the agent can be installed, upgraded and
+ distribution packages. This package contains those installers' payloads,
+ already unpacked, so dpkg owns and can verify every file and nothing
+ self-extracts at install time. The agent can then be installed, upgraded and
  removed with apt like anything else on the host.
+ .
+ The binaries are upstream's own precompiled build, not rebuilt from source.
  .
  The NGINX attachment itself is NOT included: it is compiled against one exact
  NGINX build and must match the nginx package installed on the host. Install it

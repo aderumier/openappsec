@@ -1,13 +1,24 @@
 name: Debian package
 
+# Repackages upstream's precompiled open-appsec installers as a .deb.
+#
+# Upstream ships makeself self-extracting shell installers and no distro
+# package, so there is no apt install/upgrade/removal path and nothing to pin.
+# This does not build from source: the binaries are upstream's own, which is
+# deliberate - see packaging/deb/README.md.
+
 on:
   push:
     branches: [main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      codename:
+        description: "Debian codename to fetch upstream packages for"
+        default: "trixie"
+        type: string
       version:
-        description: "Version for the .deb (defaults to the tag, else 0.0.0+<sha>)"
+        description: "Override the .deb version (default: upstream agent version)"
         required: false
         type: string
 
@@ -16,88 +27,67 @@ permissions:
 
 jobs:
   build:
-    name: Build .deb on Debian 13
+    name: Repack .deb on Debian 13
     runs-on: ubuntu-24.04
     container:
       image: debian:13
     permissions:
       contents: read
     steps:
-      # git must exist before actions/checkout, or it falls back to a REST
-      # tarball and the describe-based version below has no repository to read.
-      - name: Install build prerequisites
+      - name: Install prerequisites
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            build-essential \
-            ca-certificates \
-            cmake \
-            curl \
-            file \
-            git \
-            libboost-all-dev \
-            libbrotli-dev \
-            libcurl4-openssl-dev \
-            libgmock-dev \
-            libgtest-dev \
-            libhiredis-dev \
-            libmaxminddb-dev \
-            libpcre2-dev \
-            libssl-dev \
-            libxml2-dev \
-            pkg-config \
-            python3 \
-            zlib1g-dev
+            ca-certificates curl file git tar xz-utils
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-          fetch-depth: 0
-          fetch-tags: true
 
-      - name: Mark the workspace as safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Fetch upstream agent packages
+        id: fetch
+        env:
+          CODENAME: ${{ inputs.codename || 'trixie' }}
+        run: |
+          set -eu
+          url="https://downloads.openappsec.io/packages/agent/x86_64/debian/${CODENAME}/openappsec-${CODENAME}.tar.gz"
+          echo "fetching $url"
+          curl -fsSL --retry 3 --retry-delay 5 "$url" -o openappsec.tar.gz
+          mkdir -p upstream
+          tar xzf openappsec.tar.gz -C upstream --strip-components=1
+          ls -la upstream/
+          # The agent version is only stated in the makeself label.
+          ver="$(grep -aoE 'Nano Agent Version [0-9.]+' upstream/install-cp-nano-agent.sh \
+                 | head -1 | awk '{print $NF}')"
+          [ -n "$ver" ] || { echo "could not read agent version" >&2; exit 1; }
+          echo "agent_version=$ver" >> "$GITHUB_OUTPUT"
+          echo "upstream agent version: $ver"
 
-      # Upstream hardcodes the agent version to "private"
-      # (core/version/build_version_vars_h.py), so the package version comes
-      # from the tag instead of from the build.
       - name: Determine package version
         id: ver
+        env:
+          AGENT_VERSION: ${{ steps.fetch.outputs.agent_version }}
         run: |
+          set -eu
           if [ -n "${{ inputs.version }}" ]; then
             v="${{ inputs.version }}"
           elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             v="${GITHUB_REF_NAME}"
           else
-            v="0.0.0+$(git rev-parse --short HEAD)"
+            # ~ sorts before everything, so untagged builds never outrank a release.
+            v="${AGENT_VERSION}~$(echo "${GITHUB_SHA}" | cut -c1-7)"
           fi
           v="${v#v}"
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          echo "building version $v"
-
-      - name: Configure
-        run: cmake -DCMAKE_INSTALL_PREFIX=build_out .
-
-      - name: Build and install
-        run: make -j"$(nproc)" install
-
-      - name: Package (makeself self-extractors)
-        run: make package
-
-      - name: Show what was produced
-        run: |
-          ls -la build_out/*.sh || true
-          echo "--- runtime libraries the agent links against ---"
-          find build_out -type f -name "cp-nano-*" -perm -u+x -print0 2>/dev/null \
-            | xargs -0 -r -n1 ldd 2>/dev/null | awk '{print $1}' | sort -u | head -40
+          echo "package version: $v"
 
       - name: Build the .deb
-        run: ./packaging/deb/build-deb.sh "${{ steps.ver.outputs.version }}" build_out dist
+        run: ./packaging/deb/build-deb.sh "${{ steps.ver.outputs.version }}" upstream dist
 
-      # A plain container has no systemd, so nano_agent cannot start and
-      # orchestration never writes its status files. Assert only what install
-      # actually proves here; whether the agent inspects traffic has to be
-      # tested on a real host (see packaging/deb/README.md).
+      # A container has no systemd, so nano_agent cannot start and orchestration
+      # never writes its status files. Assert only what installation proves;
+      # whether the agent inspects traffic must be tested on a real host, see
+      # packaging/deb/README.md.
       - name: Install the .deb and verify the payload layout
         run: |
           apt-get install -y --no-install-recommends ./dist/*.deb

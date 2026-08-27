@@ -7,9 +7,15 @@ directory builds one.
 
 ## How it works
 
-`.github/workflows/build-deb.yml` builds the agent from source in a `debian:13`
-container (`cmake` → `make install` → `make package`), then `build-deb.sh`
-turns the artifacts into a package.
+`.github/workflows/build-deb.yml` downloads upstream's precompiled installers
+for the target Debian codename, then `build-deb.sh` turns them into a package.
+
+It does **not** build from source. Source builds do work on Debian 13 - CI
+proved that before this was switched - but repacking upstream's binaries means
+the package contains exactly the build that upstream tests and that is known to
+inspect traffic. `build-deb.sh` takes a directory of `install-cp-*.sh` files, so
+pointing it at `build_out/` after a `make package` still works if you ever want
+the source route.
 
 The important choice is that the makeself archives are **unpacked at build
 time**, not shipped and self-extracted on the target:
@@ -65,14 +71,14 @@ curl -s -o /dev/null -w '%{http_code}\n' 'http://host/?f=../../../../etc/passwd'
 # 403 under a prevent-mode policy; 200 means it is not inspecting
 ```
 
-If the from-source agent turns out not to inspect, `build-deb.sh` also works
-against upstream's precompiled installers — point `build_out` at a directory
-containing the downloaded `install-cp-*.sh` files. That gives the same package
-around binaries known to work.
+Extracting the payloads requires root (the archives refuse otherwise), which
+is why `build-deb.sh` is run as root in CI and needs `sudo` locally.
 
 ## Version
 
-`core/version/build_version_vars_h.py` hardcodes the agent version to
-`private`, so the package version comes from the git tag instead. Pushing a
-`v*` tag builds the package and publishes a release with it attached, using the
-workflow's own `GITHUB_TOKEN`.
+The upstream agent version is stated only in the makeself label, so the
+workflow reads it from there (`Nano Agent Version 1.1.36`). Untagged builds are
+versioned `<agent-version>~<sha>`, which sorts *below* any release. Pushing a
+`v*` tag uses the tag as the package version and publishes a release with the
+.deb attached, using the workflow's own `GITHUB_TOKEN` - no personal access
+token needed.
